@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { enhance, suggestParams } from "@/lib/enhance";
-import { parseParams } from "@/lib/params";
+import { parseParams, parseStrength } from "@/lib/params";
 import { BROWSER_HEADERS, isVintedImageUrl } from "@/lib/vinted";
 
 export const runtime = "nodejs";
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const auto = form.get("auto") !== "false";
     let params;
     if (auto) {
-      params = await suggestParams(source);
+      params = await suggestParams(source, parseStrength(form.get("strength")));
     } else {
       const raw = form.get("params");
       params = parseParams(typeof raw === "string" ? JSON.parse(raw) : {});

@@ -2,7 +2,12 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
-import { DEFAULT_PARAMS, type EnhanceParams } from "@/lib/params";
+import {
+  DEFAULT_PARAMS,
+  STRENGTHS,
+  type EnhanceParams,
+  type StrengthKey,
+} from "@/lib/params";
 
 type PhotoSource =
   | { kind: "vinted"; url: string }
@@ -26,7 +31,8 @@ const SLIDERS: {
   max: number;
   step: number;
 }[] = [
-  { key: "brightness", label: "Jasność", min: 0.6, max: 1.6, step: 0.01 },
+  { key: "brightness", label: "Jasność", min: 0.6, max: 1.7, step: 0.01 },
+  { key: "shadows", label: "Wyciąganie cieni", min: 0, max: 1.2, step: 0.02 },
   { key: "contrast", label: "Kontrast", min: 0.8, max: 1.5, step: 0.01 },
   { key: "saturation", label: "Nasycenie", min: 0.5, max: 1.8, step: 0.01 },
   { key: "sharpness", label: "Wyostrzenie", min: 0, max: 1.5, step: 0.05 },
@@ -46,6 +52,7 @@ export default function Home() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [auto, setAuto] = useState(true);
+  const [strength, setStrength] = useState<StrengthKey>("standard");
   const [params, setParams] = useState<EnhanceParams>(DEFAULT_PARAMS);
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -113,7 +120,11 @@ export default function Home() {
       form.append("imageUrl", photo.source.url);
     }
     form.append("auto", String(auto));
-    if (!auto) form.append("params", JSON.stringify(params));
+    if (auto) {
+      form.append("strength", strength);
+    } else {
+      form.append("params", JSON.stringify(params));
+    }
 
     try {
       const response = await fetch("/api/enhance", { method: "POST", body: form });
@@ -292,12 +303,32 @@ export default function Home() {
           </div>
         )}
 
-        {auto && autoSummary && (
-          <p className="mt-3 text-xs text-neutral-500">
-            Ostatni dobór: jasność {autoSummary.brightness}, kontrast{" "}
-            {autoSummary.contrast}, nasycenie {autoSummary.saturation}, wyostrzenie{" "}
-            {autoSummary.sharpness}
-          </p>
+        {auto && (
+          <div className="mt-4">
+            <span className="text-sm text-neutral-500">Siła rozjaśnienia</span>
+            <div className="mt-2 flex gap-2">
+              {(Object.keys(STRENGTHS) as StrengthKey[]).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setStrength(key)}
+                  className={`rounded-lg border px-3 py-1.5 text-sm ${
+                    strength === key
+                      ? "border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900"
+                      : "border-neutral-300 dark:border-neutral-700"
+                  }`}
+                >
+                  {STRENGTHS[key].label}
+                </button>
+              ))}
+            </div>
+            {autoSummary && (
+              <p className="mt-3 text-xs text-neutral-500">
+                Ostatni dobór: jasność {autoSummary.brightness}, cienie{" "}
+                {autoSummary.shadows}, kontrast {autoSummary.contrast}, nasycenie{" "}
+                {autoSummary.saturation}, wyostrzenie {autoSummary.sharpness}
+              </p>
+            )}
+          </div>
         )}
 
         <div className="mt-4 flex flex-wrap gap-2">
