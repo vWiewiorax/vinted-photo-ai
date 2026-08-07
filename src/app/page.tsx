@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import {
   DEFAULT_PARAMS,
@@ -55,13 +55,26 @@ export default function Home() {
   const [strength, setStrength] = useState<StrengthKey>("standard");
   const [params, setParams] = useState<EnhanceParams>(DEFAULT_PARAMS);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<{ id: string; variant: "before" | "after" } | null>(
+    null,
+  );
   const fileInput = useRef<HTMLInputElement>(null);
 
   const doneCount = photos.filter((photo) => photo.status === "done").length;
+  const previewPhoto = photos.find((photo) => photo.id === preview?.id);
   const autoSummary = useMemo(
     () => photos.find((photo) => photo.usedParams)?.usedParams,
     [photos],
   );
+
+  useEffect(() => {
+    if (!preview) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreview(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [preview]);
 
   const updatePhoto = useCallback((id: string, patch: Partial<Photo>) => {
     setPhotos((current) =>
@@ -156,23 +169,56 @@ export default function Home() {
     setBusy(false);
   }
 
-  async function downloadZip() {
-    const ready = photos.filter((photo) => photo.resultUrl);
-    if (ready.length === 0) return;
-    const zip = new JSZip();
-    await Promise.all(
-      ready.map(async (photo) => {
-        const blob = await (await fetch(photo.resultUrl!)).blob();
-        zip.file(`${photo.name}-ai.jpg`, blob);
-      }),
-    );
-    const archive = await zip.generateAsync({ type: "blob" });
-    const href = URL.createObjectURL(archive);
+  function removePhoto(id: string) {
+    setPhotos((current) => {
+      const photo = current.find((item) => item.id === id);
+      if (photo) {
+        if (photo.source.kind === "file") URL.revokeObjectURL(photo.previewUrl);
+        if (photo.resultUrl) URL.revokeObjectURL(photo.resultUrl);
+      }
+      return current.filter((item) => item.id !== id);
+    });
+    setPreview((current) => (current?.id === id ? null : current));
+  }
+
+  function saveBlob(blob: Blob, filename: string) {
+    const href = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = href;
-    anchor.download = "vinted-photo-ai.zip";
+    anchor.download = filename;
     anchor.click();
     URL.revokeObjectURL(href);
+  }
+
+  async function downloadOriginal(photo: Photo) {
+    const blob = await (await fetch(photo.previewUrl)).blob();
+    const extension = blob.type.split("/")[1]?.split("+")[0] ?? "jpg";
+    saveBlob(blob, `${photo.name}.${extension}`);
+  }
+
+  /** `variant: "ai"` pakuje poprawione zdjęcia, `"original"` — pobrane oryginały. */
+  async function downloadZip(variant: "ai" | "original") {
+    const selected =
+      variant === "ai" ? photos.filter((photo) => photo.resultUrl) : photos;
+    if (selected.length === 0) return;
+
+    const zip = new JSZip();
+    await Promise.all(
+      selected.map(async (photo) => {
+        const url = variant === "ai" ? photo.resultUrl! : photo.previewUrl;
+        const blob = await (await fetch(url)).blob();
+        const extension =
+          variant === "ai" ? "jpg" : (blob.type.split("/")[1]?.split("+")[0] ?? "jpg");
+        zip.file(
+          `${photo.name}${variant === "ai" ? "-ai" : ""}.${extension}`,
+          blob,
+        );
+      }),
+    );
+    saveBlob(
+      await zip.generateAsync({ type: "blob" }),
+      variant === "ai" ? "vinted-photo-ai.zip" : "vinted-oryginaly.zip",
+    );
   }
 
   return (
@@ -340,21 +386,28 @@ export default function Home() {
             {busy ? "Przetwarzam…" : `Popraw zdjęcia (${photos.length})`}
           </button>
           <button
-            onClick={downloadZip}
+            onClick={() => downloadZip("ai")}
             disabled={doneCount === 0}
             className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium disabled:opacity-40 dark:border-neutral-700"
           >
-            Pobierz ZIP ({doneCount})
+            Pobierz poprawione ZIP ({doneCount})
+          </button>
+          <button
+            onClick={() => downloadZip("original")}
+            disabled={photos.length === 0}
+            className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium disabled:opacity-40 dark:border-neutral-700"
+          >
+            Pobierz oryginały ZIP ({photos.length})
           </button>
           {photos.length > 0 && (
             <button
               onClick={() => {
-                setPhotos([]);
+                photos.forEach((photo) => removePhoto(photo.id));
                 setItemTitle(null);
               }}
               className="rounded-lg px-4 py-2 text-sm text-neutral-500"
             >
-              Wyczyść
+              Usuń wszystkie
             </button>
           )}
         </div>
@@ -368,24 +421,36 @@ export default function Home() {
           >
             <div className="grid grid-cols-2 gap-px bg-neutral-200 dark:bg-neutral-800">
               <figure className="bg-white dark:bg-black">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={photo.previewUrl}
-                  alt={`${photo.name} — oryginał`}
-                  className="aspect-3/4 w-full object-cover"
-                />
+                <button
+                  onClick={() => setPreview({ id: photo.id, variant: "before" })}
+                  title="Powiększ oryginał"
+                  className="block w-full cursor-zoom-in"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={photo.previewUrl}
+                    alt={`${photo.name} — oryginał`}
+                    className="aspect-3/4 w-full object-cover"
+                  />
+                </button>
                 <figcaption className="px-2 py-1 text-center text-xs text-neutral-500">
                   przed
                 </figcaption>
               </figure>
               <figure className="bg-white dark:bg-black">
                 {photo.resultUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photo.resultUrl}
-                    alt={`${photo.name} — po korekcie`}
-                    className="aspect-3/4 w-full object-cover"
-                  />
+                  <button
+                    onClick={() => setPreview({ id: photo.id, variant: "after" })}
+                    title="Powiększ poprawione"
+                    className="block w-full cursor-zoom-in"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={photo.resultUrl}
+                      alt={`${photo.name} — po korekcie`}
+                      className="aspect-3/4 w-full object-cover"
+                    />
+                  </button>
                 ) : (
                   <div className="flex aspect-3/4 w-full items-center justify-center text-xs text-neutral-400">
                     {photo.status === "working" ? "przetwarzam…" : "—"}
@@ -396,11 +461,11 @@ export default function Home() {
                 </figcaption>
               </figure>
             </div>
-            <div className="flex items-center justify-between gap-2 p-3">
-              <span className="truncate text-xs text-neutral-500" title={photo.name}>
+            <div className="p-3">
+              <span className="block truncate text-xs text-neutral-500" title={photo.name}>
                 {photo.name}
               </span>
-              <div className="flex shrink-0 gap-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   onClick={() => enhancePhoto(photo)}
                   disabled={photo.status === "working"}
@@ -414,9 +479,21 @@ export default function Home() {
                     download={`${photo.name}-ai.jpg`}
                     className="rounded-md border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
                   >
-                    Pobierz
+                    Pobierz poprawione
                   </a>
                 )}
+                <button
+                  onClick={() => downloadOriginal(photo)}
+                  className="rounded-md border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+                >
+                  Pobierz oryginał
+                </button>
+                <button
+                  onClick={() => removePhoto(photo.id)}
+                  className="rounded-md border border-red-300 px-2 py-1 text-xs text-red-600 dark:border-red-900"
+                >
+                  Usuń
+                </button>
               </div>
             </div>
             {photo.error && (
@@ -425,6 +502,53 @@ export default function Home() {
           </article>
         ))}
       </section>
+
+      {previewPhoto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setPreview(null)}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/80 p-4"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={
+              preview?.variant === "after" && previewPhoto.resultUrl
+                ? previewPhoto.resultUrl
+                : previewPhoto.previewUrl
+            }
+            alt={previewPhoto.name}
+            className="max-h-[80vh] max-w-full object-contain"
+          />
+          <div
+            onClick={(event) => event.stopPropagation()}
+            className="flex flex-wrap items-center justify-center gap-2 text-sm text-white"
+          >
+            <span className="mr-2">
+              {previewPhoto.name} — {preview?.variant === "after" ? "po korekcie" : "oryginał"}
+            </span>
+            {previewPhoto.resultUrl && (
+              <button
+                onClick={() =>
+                  setPreview({
+                    id: previewPhoto.id,
+                    variant: preview?.variant === "after" ? "before" : "after",
+                  })
+                }
+                className="rounded-md border border-white/40 px-3 py-1"
+              >
+                Pokaż {preview?.variant === "after" ? "oryginał" : "poprawione"}
+              </button>
+            )}
+            <button
+              onClick={() => setPreview(null)}
+              className="rounded-md border border-white/40 px-3 py-1"
+            >
+              Zamknij
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
