@@ -1,5 +1,12 @@
 import sharp from "sharp";
 import {
+  analyze,
+  backgroundGains,
+  backgroundIsCleanable,
+  backgroundLayer,
+  cropBox,
+} from "@/lib/listing";
+import {
   STRENGTHS,
   clamp,
   type EnhanceParams,
@@ -109,25 +116,45 @@ export async function suggestParams(
     warmth: 0,
     whiteBalance: channelSpread > 6,
     autoLevels: grey.stdev < 28,
+    // Kadr i tło zależą od detekcji produktu, więc decyzję podejmuje `enhance`.
+    autoCrop: true,
+    cleanBackground: true,
   };
+}
+
+/** Obrót zgodnie z EXIF i ograniczenie rozdzielczości — punkt wyjścia dla analizy. */
+async function stage(input: Buffer) {
+  const buffer = await sharp(input, { failOn: "none" })
+    .rotate()
+    .resize({
+      width: MAX_DIMENSION,
+      height: MAX_DIMENSION,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .png({ compressionLevel: 0 })
+    .toBuffer();
+  const { width = 0, height = 0 } = await sharp(buffer).metadata();
+  return { buffer, width, height };
 }
 
 export async function enhance(
   input: Buffer,
   params: EnhanceParams,
 ): Promise<Buffer> {
-  let pipeline = sharp(input, { failOn: "none" }).rotate();
+  const staged = await stage(input);
+  const analysis =
+    params.autoCrop || params.cleanBackground || params.whiteBalance
+      ? await analyze(staged.buffer)
+      : null;
 
-  const metadata = await pipeline.metadata();
-  const longest = Math.max(metadata.width ?? 0, metadata.height ?? 0);
-  if (longest > MAX_DIMENSION) {
-    pipeline = pipeline.resize({
-      width: MAX_DIMENSION,
-      height: MAX_DIMENSION,
-      fit: "inside",
-      withoutEnlargement: true,
-    });
-  }
+  const crop =
+    params.autoCrop && analysis
+      ? cropBox(analysis, { width: staged.width, height: staged.height })
+      : null;
+
+  let pipeline = sharp(staged.buffer, { failOn: "none" });
+  if (crop) pipeline = pipeline.extract(crop);
 
   const shadows = clamp(params.shadows, 0, NEUTRAL_GAMMA - 1);
   if (shadows > 0.01) {
@@ -135,13 +162,23 @@ export async function enhance(
   }
 
   if (params.whiteBalance) {
-    const { channels } = await sharp(input, { failOn: "none" }).rotate().stats();
-    const means = channels.slice(0, 3).map((channel) => channel.mean);
-    if (means.length === 3) {
-      const average = (means[0] + means[1] + means[2]) / 3;
-      const gains = means.map((mean) => clamp(average / Math.max(mean, 1), 0.8, 1.25));
-      pipeline = pipeline.linear(gains, [0, 0, 0]);
+    // Tło jest lepszym punktem odniesienia niż średnia całego kadru: produkt może
+    // być mocno kolorowy, a tło powinno wyjść neutralne.
+    const fromBackground = analysis ? backgroundGains(analysis) : null;
+    let gains = fromBackground;
+    if (!gains) {
+      const { channels } = await sharp(staged.buffer).stats();
+      const means = channels.slice(0, 3).map((channel) => channel.mean);
+      if (means.length === 3) {
+        const average = (means[0] + means[1] + means[2]) / 3;
+        gains = means.map((mean) => clamp(average / Math.max(mean, 1), 0.8, 1.25)) as [
+          number,
+          number,
+          number,
+        ];
+      }
     }
+    if (gains) pipeline = pipeline.linear(gains, [0, 0, 0]);
   }
 
   if (params.autoLevels) {
@@ -172,5 +209,23 @@ export async function enhance(
     });
   }
 
-  return pipeline.jpeg({ quality: 92, chromaSubsampling: "4:4:4" }).toBuffer();
+  const cleanBackground =
+    params.cleanBackground && analysis !== null && backgroundIsCleanable(analysis);
+  if (!cleanBackground) {
+    return pipeline.jpeg({ quality: 92, chromaSubsampling: "4:4:4" }).toBuffer();
+  }
+
+  // Nakładka tła musi wejść po korekcie tonalnej, inaczej sharp policzyłby na niej
+  // gammę i kontrast — dlatego korekta jest najpierw materializowana.
+  const toned = await pipeline.png({ compressionLevel: 0 }).toBuffer();
+  const layer = await backgroundLayer(
+    analysis,
+    { width: staged.width, height: staged.height },
+    crop,
+  );
+
+  return sharp(toned)
+    .composite([{ input: layer, blend: "over", left: 0, top: 0 }])
+    .jpeg({ quality: 92, chromaSubsampling: "4:4:4" })
+    .toBuffer();
 }
