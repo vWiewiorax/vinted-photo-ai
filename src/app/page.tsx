@@ -135,6 +135,8 @@ export default function Home() {
     form.append("auto", String(auto));
     if (auto) {
       form.append("strength", strength);
+      form.append("autoCrop", String(params.autoCrop));
+      form.append("cleanBackground", String(params.cleanBackground));
     } else {
       form.append("params", JSON.stringify(params));
     }
@@ -229,8 +231,9 @@ export default function Home() {
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-neutral-500 dark:text-neutral-400">
           Wklej link do oferty z Vinted albo wgraj własne zdjęcia — aplikacja
-          przeanalizuje każde ujęcie i automatycznie je rozświetli, wyrówna balans
-          bieli, podbije kolory i wyostrzy szczegóły.
+          przeanalizuje każde ujęcie, rozświetli je, wyrówna balans bieli, przytnie
+          kadr wokół produktu i wyczyści tło. Sam produkt zostaje nietknięty:
+          kolor, kształt, materiał, metki i ślady używania.
         </p>
       </header>
 
@@ -348,6 +351,41 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        <div className="mt-4 grid gap-2 rounded-lg bg-neutral-50 p-3 text-sm dark:bg-neutral-900">
+          <span className="text-neutral-500">Przygotowanie pod ofertę</span>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={params.autoCrop}
+              onChange={(event) =>
+                setParams({ ...params, autoCrop: event.target.checked })
+              }
+            />
+            <span>
+              Auto-kadr — przycina kadr wokół produktu (ok. 80% powierzchni, 3:4)
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={params.cleanBackground}
+              onChange={(event) =>
+                setParams({ ...params, cleanBackground: event.target.checked })
+              }
+            />
+            <span>
+              Czyste tło — wyrównuje tło do neutralnej bieli, nie dotyka produktu
+            </span>
+          </label>
+          <p className="text-xs text-neutral-500">
+            Oba działają tylko wtedy, gdy produkt da się pewnie wykryć (jednolite,
+            jasne tło). Przy złożonej scenie zdjęcie zostaje w oryginalnym kadrze —
+            lepiej nie ruszyć niż obciąć produkt.
+          </p>
+        </div>
 
         {auto && (
           <div className="mt-4">

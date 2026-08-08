@@ -15,6 +15,10 @@ export type EnhanceParams = {
   whiteBalance: boolean;
   /** rozciągnięcie histogramu (auto-poziomy) */
   autoLevels: boolean;
+  /** kadr wokół wykrytego produktu (~80% powierzchni kadru) */
+  autoCrop: boolean;
+  /** wyrównanie tła do neutralnej bieli (tylko poza produktem) */
+  cleanBackground: boolean;
 };
 
 /** Mnożnik siły korekty dla trybu automatycznego. */
@@ -35,6 +39,8 @@ export const DEFAULT_PARAMS: EnhanceParams = {
   warmth: 0,
   whiteBalance: true,
   autoLevels: true,
+  autoCrop: true,
+  cleanBackground: true,
 };
 
 export const clamp = (value: number, min: number, max: number) =>
@@ -64,5 +70,7 @@ export function parseParams(raw: unknown): EnhanceParams {
     warmth: num("warmth", DEFAULT_PARAMS.warmth),
     whiteBalance: bool("whiteBalance"),
     autoLevels: bool("autoLevels"),
+    autoCrop: bool("autoCrop"),
+    cleanBackground: bool("cleanBackground"),
   };
 }

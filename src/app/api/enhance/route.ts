@@ -42,6 +42,10 @@ export async function POST(request: Request) {
     let params;
     if (auto) {
       params = await suggestParams(source, parseStrength(form.get("strength")));
+      // Kadr i czyszczenie tła są niezależne od automatyki tonalnej — to decyzja
+      // użytkownika, więc przychodzą osobno także w trybie auto.
+      params.autoCrop = form.get("autoCrop") !== "false";
+      params.cleanBackground = form.get("cleanBackground") !== "false";
     } else {
       const raw = form.get("params");
       params = parseParams(typeof raw === "string" ? JSON.parse(raw) : {});
